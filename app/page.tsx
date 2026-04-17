@@ -190,4 +190,9 @@ export default function SentinelQA() {
 
 function KPICard({ title, value, color = "text-white" }: any) {
   return (
-    <div className="bg
+    <div className="bg-[#1E293B]/10 p-6 rounded-2xl border border-slate-800">
+      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">{title}</p>
+      <p className={`text-3xl font-black tracking-tighter ${color}`}>{value}</p>
+    </div>
+  );
+}
