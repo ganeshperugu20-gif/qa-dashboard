@@ -13,14 +13,15 @@ export default function SentinelQA() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // Filtering & Pagination State
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'passed', 'failed'
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
+
   // Form State
   const [newTestName, setNewTestName] = useState('');
   const [newStatus, setNewStatus] = useState('passed');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Pagination State
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(5);
 
   async function fetchData() {
     try {
@@ -45,47 +46,40 @@ export default function SentinelQA() {
 
   useEffect(() => { fetchData(); }, []);
 
-  const handleAddTest = async (e: React.FormEvent) => {
+  // Filter Logic
+  const filteredData = data.filter(res => {
+    const envMatch = (res.test_runs?.environments?.name || "").trim().toUpperCase() === activeEnv.toUpperCase();
+    const statusMatch = statusFilter === 'all' || res.status === statusFilter;
+    return envMatch && statusMatch;
+  });
+
+  // KPI Calculations
+  const stats = {
+    total: data.filter(r => (r.test_runs?.environments?.name || "").trim().toUpperCase() === activeEnv.toUpperCase()).length,
+    passed: data.filter(r => (r.test_runs?.environments?.name || "").trim().toUpperCase() === activeEnv.toUpperCase() && r.status === 'passed').length,
+    failed: data.filter(r => (r.test_runs?.environments?.name || "").trim().toUpperCase() === activeEnv.toUpperCase() && r.status === 'failed').length,
+  };
+
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredData.length / pageSize);
+  const paginatedData = filteredData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const handleManualAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTestName || isSubmitting) return;
     setIsSubmitting(true);
     try {
       const { data: env } = await supabase.from('environments').select('id').eq('name', activeEnv).single();
       let { data: run } = await supabase.from('test_runs').select('id').eq('run_name', 'Manual Execution').eq('env_id', env?.id).maybeSingle();
-
       if (!run) {
         const { data: newRun } = await supabase.from('test_runs').insert([{ run_name: 'Manual Execution', env_id: env?.id }]).select().single();
         run = newRun;
       }
-
       const { data: tCase } = await supabase.from('test_cases').insert([{ title: newTestName, suite_name: 'Manual' }]).select().single();
-
-      await supabase.from('test_results').insert([{
-        run_id: run?.id,
-        test_case_id: tCase?.id,
-        status: newStatus,
-        duration_ms: Math.floor(Math.random() * 1000) + 500
-      }]);
-
+      await supabase.from('test_results').insert([{ run_id: run?.id, test_case_id: tCase?.id, status: newStatus, duration_ms: 500 }]);
       setNewTestName('');
-      fetchData(); 
+      fetchData();
     } catch (err) { console.error(err); } finally { setIsSubmitting(false); }
-  };
-
-  // Logic: Filtering & Pagination
-  const filteredData = data.filter(res => {
-    const envName = res.test_runs?.environments?.name || "";
-    return envName.trim().toUpperCase() === activeEnv.toUpperCase();
-  });
-
-  const totalPages = Math.ceil(filteredData.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const paginatedData = filteredData.slice(startIndex, startIndex + pageSize);
-
-  const stats = {
-    total: filteredData.length,
-    passed: filteredData.filter(r => r.status === 'passed').length,
-    failed: filteredData.filter(r => r.status === 'failed').length,
   };
 
   return (
@@ -99,37 +93,28 @@ export default function SentinelQA() {
         <div className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">W2S Solutions • Internal Tools</div>
       </nav>
 
-      {/* TECHFLOW TABS */}
+      {/* TABS */}
       <div className="bg-[#111827] px-8 border-b border-slate-800/50 flex gap-6 overflow-x-auto">
-        {['Dashboard', 'Execution Logs', 'Test Suites', 'Settings'].map(tab => (
-          <button 
-            key={tab} 
-            onClick={() => { setActiveTab(tab); setCurrentPage(1); }} 
-            className={`py-4 text-[10px] whitespace-nowrap font-bold uppercase tracking-widest border-b-2 transition-all ${activeTab === tab ? 'border-amber-500 text-amber-500 bg-amber-500/5' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
-          >
-            {tab === 'Dashboard' ? '📊 ' : tab === 'Execution Logs' ? '📜 ' : tab === 'Test Suites' ? '📁 ' : '⚙️ '}{tab}
+        {['Dashboard', 'Execution Logs'].map(tab => (
+          <button key={tab} onClick={() => { setActiveTab(tab); setStatusFilter('all'); setCurrentPage(1); }} 
+            className={`py-4 text-[10px] font-bold uppercase tracking-widest border-b-2 transition-all ${activeTab === tab ? 'border-amber-500 text-amber-500 bg-amber-500/5' : 'border-transparent text-slate-500'}`}>
+            {tab}
           </button>
         ))}
       </div>
 
       <div className="p-8 max-w-7xl mx-auto">
-        
         {activeTab === 'Dashboard' && (
           <div className="animate-in fade-in duration-500">
-            {/* MANUAL ADD FORM */}
-            <section className="mb-10 bg-slate-900/50 p-6 rounded-2xl border border-slate-800">
-              <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-4">Manual Test Entry</h3>
-              <form onSubmit={handleAddTest} className="flex flex-wrap gap-4 items-end">
-                <input type="text" value={newTestName} onChange={(e) => setNewTestName(e.target.value)} placeholder="Test Case Name..." className="flex-1 min-w-[250px] bg-[#0F172A] border border-slate-700 rounded-lg px-4 py-2 text-sm outline-none focus:border-amber-500" />
-                <select value={newStatus} onChange={(e) => setNewStatus(e.target.value)} className="bg-[#0F172A] border border-slate-700 rounded-lg px-4 py-2 text-sm outline-none">
-                  <option value="passed">✅ Passed</option>
-                  <option value="failed">❌ Failed</option>
-                </select>
-                <button type="submit" disabled={isSubmitting} className="bg-amber-600 px-8 py-2 rounded-lg text-[10px] font-black uppercase transition-all hover:bg-amber-500">
-                  {isSubmitting ? 'Syncing...' : '+ Add Result'}
-                </button>
-              </form>
-            </section>
+            {/* MANUAL FORM */}
+            <form onSubmit={handleManualAdd} className="mb-10 flex gap-4 bg-slate-900/40 p-4 rounded-xl border border-slate-800">
+              <input type="text" value={newTestName} onChange={(e) => setNewTestName(e.target.value)} placeholder="New test name..." className="flex-1 bg-[#0F172A] border border-slate-700 rounded-lg px-4 py-2 text-sm" />
+              <select value={newStatus} onChange={(e) => setNewStatus(e.target.value)} className="bg-[#0F172A] border border-slate-700 rounded-lg px-4 py-2 text-sm">
+                <option value="passed">Passed</option>
+                <option value="failed">Failed</option>
+              </select>
+              <button className="bg-amber-600 px-6 py-2 rounded-lg text-[10px] font-black uppercase">Add</button>
+            </form>
 
             {/* STAGE SELECTOR */}
             <div className="flex gap-3 mb-8">
@@ -138,67 +123,85 @@ export default function SentinelQA() {
               ))}
             </div>
 
-            {/* KPI STATS */}
+            {/* KPI CARDS (CLICKABLE) */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
-              <StatCard title="Total Executed" value={stats.total} />
-              <StatCard title="Passed" value={stats.passed} color="text-emerald-400" />
-              <StatCard title="Failed" value={stats.failed} color="text-rose-400" />
+              <button onClick={() => { setStatusFilter('all'); setCurrentPage(1); }} className={`p-6 rounded-xl border transition-all text-center ${statusFilter === 'all' ? 'bg-slate-800 border-slate-400' : 'bg-slate-900/40 border-slate-800 hover:border-slate-600'}`}>
+                <p className="text-[9px] font-black text-slate-500 uppercase mb-2">Total Executed</p>
+                <p className="text-3xl font-black text-white">{stats.total}</p>
+              </button>
+              <button onClick={() => { setStatusFilter('passed'); setCurrentPage(1); }} className={`p-6 rounded-xl border transition-all text-center ${statusFilter === 'passed' ? 'bg-emerald-900/20 border-emerald-500' : 'bg-slate-900/40 border-slate-800 hover:border-emerald-900/50'}`}>
+                <p className="text-[9px] font-black text-emerald-500 uppercase mb-2">Passed</p>
+                <p className="text-3xl font-black text-emerald-400">{stats.passed}</p>
+              </button>
+              <button onClick={() => { setStatusFilter('failed'); setCurrentPage(1); }} className={`p-6 rounded-xl border transition-all text-center ${statusFilter === 'failed' ? 'bg-rose-900/20 border-rose-500' : 'bg-slate-900/40 border-slate-800 hover:border-rose-900/50'}`}>
+                <p className="text-[9px] font-black text-rose-500 uppercase mb-2">Failed</p>
+                <p className="text-3xl font-black text-rose-400">{stats.failed}</p>
+              </button>
             </div>
 
-            {/* PAGINATION CONTROLS */}
-            <div className="flex flex-wrap justify-between items-center mb-6 gap-4 bg-slate-900/20 p-4 rounded-xl border border-slate-800/50">
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-black text-slate-500 uppercase">View:</span>
-                {[5, 10, 20].map((size) => (
-                  <button key={size} onClick={() => { setPageSize(size); setCurrentPage(1); }} className={`w-8 h-8 rounded-lg text-[10px] font-black border ${pageSize === size ? 'bg-amber-500 border-amber-500 text-slate-950' : 'border-slate-800 text-slate-500'}`}>{size}</button>
-                ))}
-              </div>
+            {/* PAGINATION & FILTER HEADER */}
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">
+                {statusFilter === 'all' ? 'All Results' : `${statusFilter} results`} for {activeEnv}
+              </h3>
               <div className="flex items-center gap-4">
-                <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="px-4 py-2 bg-slate-800 rounded-lg text-[10px] font-bold uppercase disabled:opacity-20">Prev</button>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Page {currentPage} / {totalPages || 1}</span>
-                <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(p => p + 1)} className="px-4 py-2 bg-slate-800 rounded-lg text-[10px] font-bold uppercase disabled:opacity-20">Next</button>
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }} className="bg-transparent text-[10px] font-bold uppercase text-slate-500 outline-none">
+                  <option value={5}>Show 5</option>
+                  <option value={10}>Show 10</option>
+                  <option value={20}>Show 20</option>
+                </select>
+                <div className="flex gap-2">
+                  <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="w-8 h-8 rounded bg-slate-800 text-[10px] disabled:opacity-20">←</button>
+                  <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="w-8 h-8 rounded bg-slate-800 text-[10px] disabled:opacity-20">→</button>
+                </div>
               </div>
             </div>
 
-            {/* TEST STREAM */}
-            <div className="bg-[#1E293B]/20 rounded-2xl border border-slate-800/50 overflow-hidden">
-              <div className="divide-y divide-slate-800/30">
-                {loading ? (
-                  <div className="p-10 text-center text-slate-600 text-[10px] uppercase animate-pulse">Syncing Database...</div>
-                ) : paginatedData.map((res: any) => (
-                  <div key={res.id} className="p-5 flex items-center justify-between hover:bg-slate-800/10">
+            {/* LIST STREAM */}
+            <div className="bg-slate-900/20 rounded-2xl border border-slate-800 overflow-hidden divide-y divide-slate-800/50">
+              {loading ? <div className="p-10 text-center animate-pulse text-[10px] uppercase">Syncing...</div> :
+                paginatedData.map((res: any) => (
+                  <div key={res.id} className="p-5 flex items-center justify-between hover:bg-slate-800/20 transition-all">
                     <div className="flex gap-4 items-center">
-                      <div className={`w-1.5 h-1.5 rounded-full ${res.status === 'passed' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]'}`} />
+                      <div className={`w-2 h-2 rounded-full ${res.status === 'passed' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-rose-500 shadow-[0_0_10px_#f43f5e]'}`} />
                       <div>
                         <h4 className="font-bold text-slate-200 text-sm">{res.test_cases?.title}</h4>
-                        <p className="text-[9px] text-slate-600 uppercase font-bold tracking-wider">{res.test_runs?.run_name}</p>
+                        <p className="text-[9px] text-slate-600 uppercase font-bold">{res.test_runs?.run_name}</p>
                       </div>
                     </div>
                     <p className="text-[10px] font-mono text-slate-500">{new Date(res.created_at).toLocaleTimeString()}</p>
                   </div>
                 ))}
-              </div>
+              {paginatedData.length === 0 && !loading && <div className="p-10 text-center text-slate-700 text-[10px] uppercase">No {statusFilter} tests found</div>}
             </div>
           </div>
         )}
 
-        {/* --- PLACEHOLDERS FOR OTHER TABS --- */}
-        {activeTab !== 'Dashboard' && (
-          <div className="p-20 text-center border-2 border-dashed border-slate-800 rounded-3xl opacity-30">
-            <p className="text-xl font-black uppercase tracking-[0.4em]">{activeTab}</p>
-            <p className="text-[10px] mt-2 font-mono uppercase tracking-widest">Data available in Dashboard Stream</p>
+        {activeTab === 'Execution Logs' && (
+          <div className="animate-in slide-in-from-bottom-4 duration-500">
+             <table className="w-full text-left border-collapse bg-slate-900/20 rounded-2xl overflow-hidden border border-slate-800">
+                <thead className="bg-slate-800/50">
+                  <tr className="border-b border-slate-700">
+                    <th className="p-4 text-[9px] font-black uppercase text-slate-500">Status</th>
+                    <th className="p-4 text-[9px] font-black uppercase text-slate-500">Test Case</th>
+                    <th className="p-4 text-[9px] font-black uppercase text-slate-500">Duration</th>
+                    <th className="p-4 text-[9px] font-black uppercase text-slate-500">Timestamp</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {filteredData.map((res: any) => (
+                    <tr key={res.id} className="hover:bg-slate-800/20">
+                      <td className="p-4"><span className={`text-[9px] font-black uppercase ${res.status === 'passed' ? 'text-emerald-500' : 'text-rose-500'}`}>{res.status}</span></td>
+                      <td className="p-4 text-sm font-bold text-slate-300">{res.test_cases?.title}</td>
+                      <td className="p-4 text-[10px] font-mono text-slate-500">{res.duration_ms}ms</td>
+                      <td className="p-4 text-[10px] text-slate-500">{new Date(res.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+             </table>
           </div>
         )}
       </div>
     </main>
-  );
-}
-
-function StatCard({ title, value, color = "text-white" }: any) {
-  return (
-    <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800 text-center">
-      <p className="text-[9px] font-black text-slate-500 uppercase mb-2">{title}</p>
-      <p className={`text-3xl font-black ${color}`}>{value}</p>
-    </div>
   );
 }
